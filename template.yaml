@@ -1,0 +1,228 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  app
+
+  Sample SAM Template for app
+  
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+  Api:
+    EndpointConfiguration: REGIONAL
+Parameters:
+  AppStage:
+    Type: String
+    Default: api
+    Description: API Gateway stage, used as a prefix for the endpoint URLs
+    AllowedPattern: ^[A-Za-z]+$
+    MaxLength: 10
+    MinLength: 1
+    ConstraintDescription: "1-10 Latin letters"
+  UploadLimitInMb:
+    Type: Number
+    Default: 5
+    Description: Maximum upload size in megabytes
+    MinValue: 1
+    MaxValue: 100
+  ContactEmailAddress:
+    Type: String
+    Description: Email address for operational notifications
+    Default: ''
+  ThumbnailWidth:
+    Type: Number
+    Default: 300
+    Description: Thumbnail width in pixels
+    MinValue: 10
+    MaxValue: 1000
+Conditions:
+  ContactEmailSet: !Not [ !Equals ['', !Ref ContactEmailAddress]]
+Resources:
+  ShowFormFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: user-form/
+      Handler: show-form.lambdaHandler
+      Runtime: nodejs12.x
+      Events:
+        ShowForm:
+          Type: Api
+          Properties:
+            Path: /
+            Method: get
+            RestApiId: !Ref WebApi
+      Environment:
+        Variables:
+          UPLOAD_S3_BUCKET: !Ref UploadS3Bucket
+          UPLOAD_LIMIT_IN_MB: !Ref UploadLimitInMb
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref UploadS3Bucket
+  # ShowFormFunction:
+  #   Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  #   Properties:
+  #     CodeUri: user-form/
+  #     Handler: show-form.lambdaHandler
+  #     Runtime: nodejs12.x
+  #     # AutoPublishAlias: live
+  #     # DeploymentPreference:
+  #     #   Type: Linear10PercentEvery1Minute
+  #     #   Alarms:
+  #     #     - !Ref HelloWorldErrors
+  #     Events:
+  #       ShowForm:
+  #         Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+  #         Properties:
+  #           Path: /
+  #           Method: get
+  #           RestApiId: !Ref WebApi
+  #       # SubmitForm:
+  #       #   Type: Api
+  #       #   Properties:
+  #       #     Path: /
+  #       #     Method: post
+  #       #     RestApiId: !Ref WebApi
+  ConfirmUploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: user-form/
+      Handler: confirm-upload.lambdaHandler
+      Runtime: nodejs12.x
+      Events:
+        ConfirmForm:
+          Type: Api
+          Properties:
+            Path: /confirm
+            Method: get
+            RestApiId: !Ref WebApi
+      Environment:
+        Variables:
+          UPLOAD_S3_BUCKET: !Ref ThumbnailsS3Bucket
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref ThumbnailsS3Bucket
+  ConvertFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: image-conversion/
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Events:
+        FileUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref UploadS3Bucket
+            Events: s3:ObjectCreated:*
+      Timeout: 600
+      MemorySize: 1024
+      Environment:
+        Variables:
+          OUTPUT_BUCKET: !Ref ThumbnailsS3Bucket
+          THUMB_WIDTH: !Ref ThumbnailWidth
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref ThumbnailsS3Bucket
+      Layers:
+        - !GetAtt ImageMagick.Outputs.LayerVersion
+      DeadLetterQueue:
+        Type: SNS
+        TargetArn: !Ref NotifyAdmins
+  ConvertFunctionCanReadUploads:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ConvertFunctionCanReadUploads
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+            Resource:
+              - !Sub "${UploadS3Bucket.Arn}/*"
+      Roles:
+        - !Ref ConvertFileFunctionRole
+  NotifyAdmins:
+    Type: AWS::SNS::Topic
+  AlarmNotifyOpsSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: ContactEmailSet 
+    Properties:
+      Endpoint: !Ref ContactEmailAddress
+      Protocol: email
+      TopicArn: !Ref NotifyAdmins
+  WebApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref AppStage
+  ImageMagick:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location:
+        ApplicationId: arn:aws:serverlessrepo:us-east-1:145266761615:applications/image-magick-lambda-layer
+        SemanticVersion: 1.0.0
+  UploadS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  ThumbnailsS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  # HelloWorldErrors:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     MetricName: Errors
+  #     Statistic: Sum
+  #     ComparisonOperator: GreaterThanThreshold
+  #     Threshold: 5
+  #     Period: 60
+  #     EvaluationPeriods: 1
+  #     TreatMissingData: notBreaching
+  #     Namespace: "AWS/Lambda"
+  #     Dimensions:
+  #       - Name: FunctionName
+  #         Value: !Ref HelloWorldFunction
+
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  UserFormApi:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${WebApi}.execute-api.${AWS::Region}.amazonaws.com/${AppStage}/"
+    # Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/hello/"
+  # ShowFormFunction:
+  #   Description: "Hello World Lambda Function ARN"
+  #   Value: !GetAtt ShowFormFunction.Arn
+  # ShowFormFunctionIamRole:
+  #   Description: "Implicit IAM Role created for Hello World function"
+  #   Value: !GetAtt ShowFormFunctionRole.Arn
+  # ProcessFormFunction:
+  #   Description: "Hello World Lambda Function ARN"
+  #   Value: !GetAtt ProcessFormFunction.Arn
+  # ProcessFormFunctionIamRole:
+  #   Description: "Implicit IAM Role created for Hello World function"
+  #   Value: !GetAtt ProcessFormFunctionRole.Arn
+  UploadBucket:
+    Description: "S3 Bucket for user information"
+    Value: !Ref UploadS3Bucket
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: image-thumbnails
+    Description: >
+      A sample application for the Running Serverless book tutorial
+    Author: Gojko Adzic
+    SemanticVersion: 1.0.0
+    SpdxLicenseId: MIT
+    LicenseUrl: LICENSE.md
+    ReadmeUrl: README.md
+    Labels: ['layer', 'image', 'lambda', 'imagemagick']
+    HomePageUrl: https://runningserverless.com
+    SourceCodeUrl: https://runningserverless.com
