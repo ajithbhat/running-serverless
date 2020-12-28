@@ -89,3 +89,56 @@ async function pollForResult(url, timeout, times) {
     return pollForResult(url, timeout, times - 1);
   }
 }
+
+function showStep(label) {
+  const sections = Array.from(document.querySelectorAll("[step]"));
+  sections.forEach((section) => {
+    if (section.getAttribute("step") === label) {
+      section.style.display = "";
+    } else {
+      section.style.display = "none";
+    }
+  });
+}
+
+function progressNotifier(progressEvent) {
+  const progressElement = document.getElementById("progressbar");
+  const total = progressEvent.total;
+  const current = progressEvent.loaded;
+  if (current && total) {
+    progressElement.setAttribute("max", total);
+    progressElement.setAttribute("value", current);
+  }
+}
+
+async function startUpload(evt) {
+  const picker = evt.target;
+  const file = picker.files && picker.files[0];
+  const apiUrl = document.getElementById("apiurl").value;
+
+  if (file && file.name) {
+    picker.value = "";
+    try {
+      showStep("uploading");
+      const signatures = await getSignatures(apiUrl);
+      console.log("got signatures", signatures);
+      await uploadBlob(signatures.upload, file, progressNotifier);
+      showStep("converting");
+      await pollForResult(signatures.download, 3000, 20);
+      const downloadLink = document.getElementById("resultlink");
+      downloadLink.setAttribute("href", signatures.download);
+      showStep("result");
+    } catch (e) {
+      console.error(e);
+      const displayError = e.message || JSON.stringify(e);
+      document.getElementById("errortext").innerHTML = displayError;
+      showStep("error");
+    }
+  }
+}
+function initPage() {
+  const picker = document.getElementById("picker");
+  showStep("initial");
+  picker.addEventListener("change", startUpload);
+}
+window.addEventListener("DOMContentLoaded", initPage);

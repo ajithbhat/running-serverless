@@ -6,7 +6,7 @@ codeuri = "user-form/"
 runtime = "nodejs12.x"
 source_md5 = ""
 packagetype = "Zip"
-functions = ["ShowFormFunction", "ConfirmUploadFunction"]
+functions = ["ShowFormFunction"]
 
 [function_build_definitions.0a84a5a2-86ee-46d3-a85e-e8fc064172b9]
 codeuri = "image-conversion/"
@@ -14,5 +14,12 @@ runtime = "nodejs12.x"
 source_md5 = ""
 packagetype = "Zip"
 functions = ["ConvertFileFunction"]
+
+[function_build_definitions.85638ab0-ba90-454f-975e-b095318ffdae]
+codeuri = "web-site/"
+runtime = "python3.7"
+source_md5 = ""
+packagetype = "Zip"
+functions = ["SiteSource"]
 
 [layer_build_definitions]

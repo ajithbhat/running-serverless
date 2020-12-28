@@ -56,9 +56,13 @@ Resources:
         Variables:
           UPLOAD_S3_BUCKET: !Ref UploadS3Bucket
           UPLOAD_LIMIT_IN_MB: !Ref UploadLimitInMb
+          CORS_ORIGIN: !GetAtt WebAssetsS3Bucket.WebsiteURL
+          THUMBNAILS_S3_BUCKET: !Ref ThumbnailsS3Bucket
       Policies:
         - S3FullAccessPolicy:
             BucketName: !Ref UploadS3Bucket
+        - S3ReadPolicy:
+            BucketName: !Ref ThumbnailsS3Bucket
   # ShowFormFunction:
   #   Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
   #   Properties:
@@ -83,25 +87,25 @@ Resources:
   #       #     Path: /
   #       #     Method: post
   #       #     RestApiId: !Ref WebApi
-  ConfirmUploadFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: user-form/
-      Handler: confirm-upload.lambdaHandler
-      Runtime: nodejs12.x
-      Events:
-        ConfirmForm:
-          Type: Api
-          Properties:
-            Path: /confirm
-            Method: get
-            RestApiId: !Ref WebApi
-      Environment:
-        Variables:
-          UPLOAD_S3_BUCKET: !Ref ThumbnailsS3Bucket
-      Policies:
-        - S3ReadPolicy:
-            BucketName: !Ref ThumbnailsS3Bucket
+  # ConfirmUploadFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     CodeUri: user-form/
+  #     Handler: confirm-upload.lambdaHandler
+  #     Runtime: nodejs12.x
+  #     Events:
+  #       ConfirmForm:
+  #         Type: Api
+  #         Properties:
+  #           Path: /confirm
+  #           Method: get
+  #           RestApiId: !Ref WebApi
+  #     Environment:
+  #       Variables:
+  #         UPLOAD_S3_BUCKET: !Ref ThumbnailsS3Bucket
+  #     Policies:
+  #       - S3ReadPolicy:
+  #           BucketName: !Ref ThumbnailsS3Bucket
   ConvertFileFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -155,6 +159,7 @@ Resources:
     Type: AWS::Serverless::Api
     Properties:
       StageName: !Ref AppStage
+      Cors: !Sub "'${WebAssetsS3Bucket.WebsiteURL}'"
   ImageMagick:
     Type: AWS::Serverless::Application
     Properties:
@@ -168,6 +173,21 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - POST
+            AllowedOrigins:
+              - !GetAtt WebAssetsS3Bucket.WebsiteURL
+            MaxAge: 3600
+  WebAssetsS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        ErrorDocument: 404.html
+        IndexDocument: index.html
   ThumbnailsS3Bucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -175,6 +195,46 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - !GetAtt WebAssetsS3Bucket.WebsiteURL
+            MaxAge: 3600
+  DeployToS3:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location:
+        ApplicationId: arn:aws:serverlessrepo:us-east-1:375983427419:applications/deploy-to-s3
+        SemanticVersion: 1.0.0
+  SiteSource:
+    Type: AWS::Serverless::Function
+    Properties:
+      Layers:
+        - !GetAtt DeployToS3.Outputs.Arn
+      CodeUri: web-site/
+      AutoPublishAlias: production
+      Runtime: python3.7
+      Handler: deployer.resource_handler
+      Timeout: 600
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref WebAssetsS3Bucket
+  DeploymentResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SiteSource.Arn
+      Version: !Ref "SiteSource.Version"
+      TargetBucket: !Ref WebAssetsS3Bucket
+      Substitutions:
+        FilePattern: "*.html"
+        Values:
+          API_URL: !Sub "https://${WebApi}.execute-api.${AWS::Region}.amazonaws.com/${AppStage}/"
+      Acl: 'public-read'
+      CacheControlMaxAge: 600
   # HelloWorldErrors:
   #   Type: AWS::CloudWatch::Alarm
   #   Properties:
@@ -213,6 +273,9 @@ Outputs:
   UploadBucket:
     Description: "S3 Bucket for user information"
     Value: !Ref UploadS3Bucket
+  WebUrl:
+    Description: "Public web URL"
+    Value: !GetAtt WebAssetsS3Bucket.WebsiteURL
 Metadata:
   AWS::ServerlessRepo::Application:
     Name: image-thumbnails

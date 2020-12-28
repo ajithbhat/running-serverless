@@ -1,28 +1,56 @@
-const htmlResponse = require("./html-response");
-const buildForm = require("./build-form");
+const jsonResponse = require("./json-response");
 const aws = require("aws-sdk");
 const s3 = new aws.S3();
 const uploadLimitInMB = parseInt(process.env.UPLOAD_LIMIT_IN_MB);
-
 exports.lambdaHandler = async (event, context) => {
-  // console.log(event);
-  const apiHost = event.requestContext.domainName,
-    prefix = event.requestContext.stage,
-    redirectUrl = `https://${apiHost}/${prefix}/confirm`,
-    params = {
+  const key = context.awsRequestId + ".jpg",
+    uploadParams = {
       Bucket: process.env.UPLOAD_S3_BUCKET,
       Expires: 600,
       Conditions: [["content-length-range", 1, uploadLimitInMB * 1000000]],
       Fields: {
-        success_action_redirect: redirectUrl,
         acl: "private",
-        key: context.awsRequestId + ".jpg",
-        // key: context.awsRequestId,
+        key: key,
       },
     },
-    form = s3.createPresignedPost(params);
-  return htmlResponse(buildForm(form));
+    uploadForm = s3.createPresignedPost(uploadParams),
+    downloadParams = {
+      Bucket: process.env.THUMBNAILS_S3_BUCKET,
+      Key: key,
+      Expires: 600,
+    },
+    downloadUrl = s3.getSignedUrl("getObject", downloadParams);
+  return jsonResponse({
+    upload: uploadForm,
+    download: downloadUrl,
+  });
 };
+
+// const htmlResponse = require("./html-response");
+// const buildForm = require("./build-form");
+// const aws = require("aws-sdk");
+// const s3 = new aws.S3();
+// const uploadLimitInMB = parseInt(process.env.UPLOAD_LIMIT_IN_MB);
+
+// exports.lambdaHandler = async (event, context) => {
+//   // console.log(event);
+//   const apiHost = event.requestContext.domainName,
+//     prefix = event.requestContext.stage,
+//     redirectUrl = `https://${apiHost}/${prefix}/confirm`,
+//     params = {
+//       Bucket: process.env.UPLOAD_S3_BUCKET,
+//       Expires: 600,
+//       Conditions: [["content-length-range", 1, uploadLimitInMB * 1000000]],
+//       Fields: {
+//         success_action_redirect: redirectUrl,
+//         acl: "private",
+//         key: context.awsRequestId + ".jpg",
+//         // key: context.awsRequestId,
+//       },
+//     },
+//     form = s3.createPresignedPost(params);
+//   return htmlResponse(buildForm(form));
+// };
 // // const axios = require('axios')
 // // const url = 'http://checkip.amazonaws.com/';
 // let response;
